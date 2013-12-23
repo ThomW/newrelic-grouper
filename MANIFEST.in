@@ -1,0 +1,4 @@
+recursive-include scripts *
+include nrgrouper*
+include LICENSE*
+include README*

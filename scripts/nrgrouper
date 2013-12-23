@@ -1,0 +1,49 @@
+#!/usr/bin/env python
+# -*- coding: iso-8859-15 -*-
+# Copyright (C) 2013  Jamie Duncan (jamie.e.duncan@gmail.com)
+
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+# File Name : nrgrouper
+# Creation Date : 11-08-2013
+# Created By : Jamie Duncan
+# Re-used By : Seth Schwartzman
+# Last Modified : Sat 16 Nov 2013 15:15:51 PM EST
+# Purpose : a simple daemon for the New Relic Grouper Plugin
+
+import time
+from daemon import runner 
+from newrelic_grouper.newrelic import NRGrouper
+
+class RunApp:
+    def __init__(self):
+        self.data = NRGrouper()
+        self.stdin_path = '/dev/null'
+        #self.stdout_path = '/dev/tty'
+        #self.stderr_path = '/dev/tty'
+        # comment-out 2 above lines and uncomment 2 below when debugging
+        self.stdout_path = './nrgrouper.out'
+        self.stderr_path = './nrgrouper.err'
+        self.pidfile_path =  '/tmp/nrgrouper.pid'
+        self.pidfile_timeout = 5
+
+    def run(self):
+        while True:
+            self.data.add_to_newrelic()
+            time.sleep(60)
+
+app = RunApp()
+daemon_runner = runner.DaemonRunner(app)
+daemon_runner.do_action()

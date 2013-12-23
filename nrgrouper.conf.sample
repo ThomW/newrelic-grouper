@@ -1,0 +1,31 @@
+[newrelic]
+
+key = [enter your license key here]
+api_key = [enter your API key here] 
+url = https://platform-api.newrelic.com/platform/v1/metrics
+
+enable_proxy = False
+http_proxy_url = [enter your proxy host here]
+http_proxy_port = 3128
+http_proxy_type = http
+
+debug = True
+ 
+[instance]
+
+host = api.newrelic.com
+port = 443 
+ssl = True
+name = My Servers
+filter_key = ids
+filter = 
+
+[plugin]
+
+name = Grouper
+guid = com.chocolatefactory.grouper
+duration = 60
+version = 0.1
+
+enable_all = True
+enable_servers = True

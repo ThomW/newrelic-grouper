@@ -1,0 +1,12 @@
+#!/bin/sh
+#
+# nrgrouper          Start up the Grouper Plugin for New Relic
+#
+# chkconfig: 35 99 10
+# description: This is a Plugin for New Relic
+#
+# processname: nrgrouper
+# config: /opt/newrelic/newrelic-grouper-plugin/nrgrouper.conf
+# pidfile: /tmp/nrgrouper.pid
+
+/usr/bin/nrgrouper $1
