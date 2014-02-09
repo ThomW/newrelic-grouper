@@ -25,10 +25,12 @@
 
 import ast
 import base64
+from collections import defaultdict
 import ConfigParser
 import exceptions
 import json
 import os
+from pprint import pprint
 import string
 import sys
 import time
@@ -37,6 +39,9 @@ import xmltodict
 import re
 import retry
 from subprocess import Popen, PIPE
+
+def tree(): 
+    return defaultdict(tree)
 
 class NRGrouper:
 
@@ -64,29 +69,29 @@ class NRGrouper:
             self.guid = config.get('plugin', 'guid')
             self.name = config.get('plugin', 'name')
             self.version = config.get('plugin','version')
-            self.nrhost = config.get('instance', 'host')
-            self.nrport = config.get('instance', 'port')            
-            self.nrssl = config.getboolean('instance', 'ssl')
-            self.nrfilter = config.get('instance', 'filter')
-            self.nrfilterkey = config.get('instance', 'filter_key')
- 
-            # Let config file override instance "name" in New Relic
-            if config.has_option('instance', 'name'):
-                self.nrname = config.get('instance', 'name')
-                # If it's empty/blank, use Jamie's "parse hostname" thing.
-                if self.nrname is None or self.nrname.strip() == "":
-                    self.nrname = self._parse_hostname()
-            # If not there, use Jamie's "parse hostname" thing.
-            else:
-                self.nrname = self._parse_hostname()
             
-            # host and port now optional
-            if self.nrhost is None:
-                self.nrhost = 'api.newrelic.com'
-            if self.nrport is None:
-                self.nrport = 443  
-            self.nruri = "%s:%s" % (self.nrhost, self.nrport)
- 
+            self.instances = tree()
+            for section in config.sections():
+                if str(section).find('instance') == -1:
+                    continue
+                    
+                nrname = config.get(section, 'name')
+                self.instances[nrname]['nrname'] = nrname
+                self.instances[nrname]['nrhost'] = config.get(section, 'host')
+                if self.instances[nrname]['nrhost'] is None:
+                    self.instances[nrname]['nrhost'] = 'api.newrelic.com'
+                self.instances[nrname]['nrport'] = config.get(section, 'port')
+                if self.instances[nrname]['nrport'] is None:
+                    self.instances[nrname]['nrport'] = 443
+                self.instances[nrname]['nrssl'] = config.getboolean(section, 'ssl')             
+                self.instances[nrname]['nrfilter'] = config.get(section, 'filter')
+                self.instances[nrname]['nrfilterkey'] = config.get(section, 'filter_key')
+                self.instances[nrname]['nruri'] = "%s:%s" % (self.instances[nrname]['nrhost'], self.instances[nrname]['nrport'])
+                if self.instances[nrname]['nrssl']:
+                    self.instances[nrname]['nrurl'] = "https://%s:%s/v2" % (self.instances[nrname]['nrhost'], self.instances[nrname]['nrport'])
+                else:
+                    self.instances[nrname]['nrurl'] = "http://%s:%s/v2" % (self.instances[nrname]['nrhost'], self.instances[nrname]['nrport'])
+            
             #create a dictionary to hold the various data metrics.
             self.metric_data = {}
 
@@ -97,10 +102,6 @@ class NRGrouper:
 
             self._build_agent_stanza()
             
-            if self.nrssl:
-                self.nrurl = "https://%s:%s/v2" % (self.nrhost, self.nrport)
-            else:
-                self.nrurl = "http://%s:%s/v2" % (self.nrhost, self.nrport)
 
         except:
             print "Cannot Open Config File", sys.exc_info()[0]
@@ -114,12 +115,13 @@ class NRGrouper:
         values['version'] = self.version
         self.json_data['agent'] = values
 
-    def _build_component_stanza(self):
+    def _build_component_stanza(self, instance):
+        #pprint(instance)
         '''this will build the 'component' stanza for the new relic json call'''
         c_list = []
         c_dict = {}
-        if (self.nrname is not None):
-            c_dict['name'] = self.nrname
+        if (instance['nrname'] is not None):
+            c_dict['name'] = instance['nrname']
         else:
             c_dict['name'] = 'My Servers'
         c_dict['guid'] = self.guid
@@ -129,7 +131,7 @@ class NRGrouper:
         #self._get_sys_info()
         
         if self.enable_servers:
-            self.get_details('server', 'filter['+self.nrfilterkey+']='+self.nrfilter)
+            self.get_details(instance['nrurl'], 'server', 'filter['+instance['nrfilterkey']+']='+instance['nrfilter'])
 
         c_dict['metrics'] = self.metric_data
         c_list.append(c_dict)
@@ -152,12 +154,12 @@ class NRGrouper:
         self.json_data = {}
         self._build_agent_stanza()
 
-    def add_to_newrelic(self):
+    def add_to_newrelic(self, instance):
         '''this will glue it all together into a json request and execute'''
         if self.first_run:
             self._prep_first_run()  #prime the data buffers if it's the first loop
 
-        self._build_component_stanza()  #get the data added up
+        self._build_component_stanza(self.instances[instance])  #get the data added up
         try:
             if self.enable_proxy:
                 proxy_handler = urllib2.ProxyHandler({'%s' % self.http_proxy_type : '%s:%s' % (self.http_proxy_url, self.http_proxy_port)})
@@ -198,12 +200,12 @@ class NRGrouper:
         
         self._reset_json_data()
 
-    def execute_rest(self, resturl, resttype, filter=None):
+    def execute_rest(self, nrurl, resturl, resttype, filter=None):
         response = None
         if filter is not None:
-           requrl = "%s/%s.%s?%s" % (self.nrurl, resturl, resttype, filter)
+           requrl = "%s/%s.%s?%s" % (nrurl, resturl, resttype, filter)
         else:
-           requrl = "%s/%s.%s" % (self.nrurl, resturl, resttype)            
+           requrl = "%s/%s.%s" % (nrurl, resturl, resttype)            
         request = urllib2.Request(requrl)
         request.add_header("Content-Type","application/"+resttype)
         request.add_header("Accept","application/"+resttype) 
@@ -236,8 +238,8 @@ class NRGrouper:
             self.output_error(request, e)          
         return
 
-    def get_details(self, category, filter=None):
-        the_deets = self.execute_rest(category+'s', 'json', filter)
+    def get_details(self, nrurl, category, filter=None):
+        the_deets = self.execute_rest(nrurl, category+'s', 'json', filter)
         if the_deets is not None:
             print the_deets
             for deet in the_deets[category+'s']:
@@ -283,7 +285,7 @@ class NRGrouper:
             sys.stderr.flush()
             sys.stdout.flush()
         return             
-        
+         
     def walk_results(self, data):
         nested_keys = tuple(key for key in data.keys() if isinstance(data[key],dict))
         items = tuple((key,data[key]) for key in data.keys() if key not in nested_keys)

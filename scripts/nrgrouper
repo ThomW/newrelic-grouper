@@ -34,14 +34,15 @@ class RunApp:
         #self.stdout_path = '/dev/tty'
         #self.stderr_path = '/dev/tty'
         # comment-out 2 above lines and uncomment 2 below when debugging
-        self.stdout_path = './nrgrouper.out'
-        self.stderr_path = './nrgrouper.err'
+        self.stdout_path = '/tmp/nrgrouper.out'
+        self.stderr_path = '/tmp/nrgrouper.err'
         self.pidfile_path =  '/tmp/nrgrouper.pid'
         self.pidfile_timeout = 5
 
     def run(self):
         while True:
-            self.data.add_to_newrelic()
+            for instance in self.data.instances:
+                self.data.add_to_newrelic(instance)
             time.sleep(60)
 
 app = RunApp()
