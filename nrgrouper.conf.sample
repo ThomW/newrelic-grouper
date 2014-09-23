@@ -14,7 +14,7 @@ debug = True
 [instance]
 
 host = api.newrelic.com
-port = 443 
+port = 443
 ssl = True
 name = My Servers
 filter_key = ids
