@@ -25,7 +25,7 @@
 
 import ast
 import base64
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 import ConfigParser
 import exceptions
 import json
@@ -49,7 +49,6 @@ class NRGrouper:
 
         self.hostname = os.uname()[1]
         self.json_data = {}     #a construct to hold the json call data as we build it
-        self.first_run = True   #this is set to False after the first run function is called
 
         try:
             self.config_file = conf
@@ -65,6 +64,12 @@ class NRGrouper:
             self.api_key = config.get('newrelic', 'api_key')
             self.license_key = config.get('newrelic', 'key')
             self.api_url = config.get('newrelic', 'url')
+
+            self.insights_account_id = config.get('Insights', 'account_id')
+            self.insights_api_key = config.get('Insights', 'api_key')
+            self.insights_url = config.get('Insights', 'url')
+            self.insights_event_type = config.get('Insights', 'event_type')
+
             self.duration = config.getint('plugin', 'duration')
             self.guid = config.get('plugin', 'guid')
             self.name = config.get('plugin', 'name')
@@ -137,29 +142,54 @@ class NRGrouper:
         c_list.append(c_dict)
 
         self.json_data['components'] = c_list
+
+    def run(self):
+        """
+        This is the infinite loop that's responsible for keeping the application alive
+        """
+        # INFINITE LOOP
+        while True:
+
+            # Capture start time of this iteration of the main loop
+            start_time = time.time()
+
+            # Update all instances
+            for instance in self.instances:
+                self.add_to_newrelic(instance)
+
+            # Calculate the amount of time passed, and the amount of time that should be spent sleeping
+            duration = time.time() - start_time
+            sleep_seconds = 0
+            if duration <= 60:
+                sleep_seconds = 60 - duration
+
+            if self.debug:
+                print 'Last loop took {duration} seconds. Sleeping for {sleep_seconds} seconds'.format(duration=duration, sleep_seconds=sleep_seconds)
+
+            time.sleep(sleep_seconds)
+
         
-    def _prep_first_run(self):
-        '''this will prime the needed buffers to present valid data when math is needed'''
+    def add_to_newrelic(self, instance):
+        """
+        * Query data from New Relic APM
+        * Build response
+        * Send response for Grouper Plugin
+        * Send response to Insights
+        """
 
-        # then we sleep so the math represents 1 minute intervals when we do it next
-        # time.sleep(60)
-        self.first_run = False
-        if self.debug:
-            print "The pump is primed"
-        return True
-
-    def _reset_json_data(self):
-        '''this will 'reset' the json data structure and prepare for the next call. It does this by mimicing what happens in __init__'''
+        # Reset variables
+        self.newrelic_data = {}
         self.metric_data = {}
         self.json_data = {}
         self._build_agent_stanza()
 
-    def add_to_newrelic(self, instance):
-        '''this will glue it all together into a json request and execute'''
-        if self.first_run:
-            self._prep_first_run()  #prime the data buffers if it's the first loop
+        request_complete = False
 
-        self._build_component_stanza(self.instances[instance])  #get the data added up
+        # Do a request to retrieve data from New Relic,
+        # and format data into something we can feed back as
+        # part of grouper.  Data is formatted and stored in self.json_data.
+        self._build_component_stanza(self.instances[instance])
+
         try:
             if self.enable_proxy:
                 proxy_handler = urllib2.ProxyHandler({'%s' % self.http_proxy_type : '%s:%s' % (self.http_proxy_url, self.http_proxy_port)})
@@ -172,7 +202,6 @@ class NRGrouper:
             request.add_header("Accept","application/json")
             
             response = self.opener_with_retry(opener, request, json.dumps(self.json_data))
-            #response = opener.open(request, json.dumps(self.json_data))
             
             if self.debug:
                 print request.get_full_url()
@@ -180,7 +209,13 @@ class NRGrouper:
                 print json.dumps(self.json_data)
                 sys.stdout.flush()
             response.close()
-        
+
+            print 'returned from opener_with_retry'
+
+            request_complete = True
+
+            print 'request_complete = {0}'.format(request_complete)
+
         except urllib2.HTTPError, err:
             if self.debug:
                 print request.get_full_url()
@@ -197,8 +232,110 @@ class NRGrouper:
                 sys.stderr.flush()
                 sys.stdout.flush()
             pass
+
+        # If the above request was completed successfully, fire off the Insights event
+        # to format and send an event to Insights
+        if request_complete:
+            self.post_insights_event(self.instances[instance])
+
+
+    def post_insights_event(self, active_instance):
+        """
+        Take the current metric_data and create an Insights event
+        """
+
+        """
+        Sample of self.metric_data which is used to build data for Insights event
+
+        {
+            u'links':
+            {
+                u'server.alert_policy': u'/v2/alert_policies/{alert_policy_id}'
+            },
+            u'servers':
+            [
+                {
+                    u'name': u'LMNOpc',
+                    u'links':
+                    {
+                        u'alert_policy': 288120
+                    },
+                    u'reporting': True,
+                    u'host': u'(none)',
+                    u'summary':
+                    {
+                        u'memory_used': 288358400,
+                        u'disk_io': 0.01,
+                        u'fullest_disk': 30.8,
+                        u'memory_total': 2088763392,
+                        u'fullest_disk_free': 11119000000,
+                        u'cpu_stolen': 0.02,
+                        u'memory': 13.8,
+                        u'cpu': 1.55
+                    },
+                    u'health_status': u'gray',
+                    u'last_reported_at': u'2014-09-25T15:19:39+00:00',
+                    u'id': 11188319,
+                    u'account_id': 755776
+                }
+            ]
+        }
+        """
+
+        # Build Insights event data structure
+        # See: https://docs.newrelic.com/docs/insights/new-relic-insights/adding-querying-data/inserting-custom-events#json-format
+        insights_event = []
+        for server in self.newrelic_data['servers']:
+            event = OrderedDict([
+                    ('eventType', self.insights_event_type),
+                    ('groupName', active_instance['nrname']),
+                    ('serverName', server['name'])
+                ])
+            for key in server['summary']:
+                event[key] = server['summary'][key]
+            insights_event.append(event)
+
+        # Blast data to Insights
+        try:
+            if self.enable_proxy:
+                proxy_handler = urllib2.ProxyHandler({'%s' % self.http_proxy_type : '%s:%s' % (self.http_proxy_url, self.http_proxy_port)})
+                opener = urllib2.build_opener(proxy_handler)
+            else:
+                opener = urllib2.build_opener(urllib2.HTTPHandler(), urllib2.HTTPSHandler())
+
+            # Adding data here rather than passing along as parameter to opener_with_retry so that the request is POST'd
+            # See: https://docs.python.org/2/library/urllib2.html#urllib2.Request
+            request = urllib2.Request(self.insights_url.format(account_id = self.insights_account_id), json.dumps(insights_event))
+            request.add_header("X-Insert-Key", self.insights_api_key)
+            request.add_header("Content-Type","application/json")
+            request.add_header("Accept","application/json")
+
+            response = self.opener_with_retry(opener, request)
+
+            if self.debug:
+                print request.get_full_url()
+                print response.getcode()
+                print json.dumps(insights_event)
+                sys.stdout.flush()
+
+            response.close()
+
+        except urllib2.HTTPError, err:
+            if self.debug:
+                print request.get_full_url()
+                print err.code
+                print json.dumps(insights_event)
+                sys.stderr.flush()
+                sys.stdout.flush()
+            pass    #i know, i don't like it either, but we don't want a single failed connection to break the loop.
         
-        self._reset_json_data()
+        except IOError, err:
+            if self.debug:
+                print request.get_full_url()
+                print err   #this error will kick if you lose DNS resolution briefly. We'll keep trying.
+                sys.stderr.flush()
+                sys.stdout.flush()
+            pass
 
     def execute_rest(self, nrurl, resturl, resttype, filter=None):
         response = None
@@ -218,8 +355,8 @@ class NRGrouper:
             return
         except IOError, e:
             self.output_error(request, e)
-            return 
-                                     
+            return
+
         try:
             if response is None:
                 return # No response to parse.
@@ -228,9 +365,11 @@ class NRGrouper:
             elif resttype == 'xml':
                 results = xmltodict.parse(response.read())
             if self.debug:
-                print request.get_full_url()
+                print 'URL: ' + request.get_full_url()
                 print response.getcode()
+                print 'RESULTS'
                 print results
+                print ''
                 sys.stdout.flush()
             response.close()
             return results       
@@ -239,10 +378,10 @@ class NRGrouper:
         return
 
     def get_details(self, nrurl, category, filter=None):
-        the_deets = self.execute_rest(nrurl, category+'s', 'json', filter)
-        if the_deets is not None:
-            print the_deets
-            for deet in the_deets[category+'s']:
+        self.newrelic_data = self.execute_rest(nrurl, category+'s', 'json', filter)
+        if self.newrelic_data is not None:
+            print self.newrelic_data
+            for deet in self.newrelic_data[category+'s']:
                 self.print_results(deet, deet['name'])
 
     def print_results(self, data, prefix):

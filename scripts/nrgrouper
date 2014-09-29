@@ -21,6 +21,7 @@
 # Created By : Jamie Duncan
 # Re-used By : Seth Schwartzman
 # Last Modified : Sat 16 Nov 2013 15:15:51 PM EST
+# Re-used By : Thom Wetzel
 # Purpose : a simple daemon for the New Relic Grouper Plugin
 
 import time
@@ -40,10 +41,11 @@ class RunApp:
         self.pidfile_timeout = 5
 
     def run(self):
-        while True:
-            for instance in self.data.instances:
-                self.data.add_to_newrelic(instance)
-            time.sleep(60)
+        """
+        Call NRGrouper's run() method, which contains an infinite loop to make it more self-contained
+        """
+        self.data.run()
+
 
 app = RunApp()
 daemon_runner = runner.DaemonRunner(app)
