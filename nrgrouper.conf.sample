@@ -10,6 +10,12 @@ http_proxy_port = 3128
 http_proxy_type = http
 
 debug = True
+
+[Insights]
+account_id = [your account_id  (found in the URL for Insights)]
+api_key = [your Insights API key]
+url = https://insights-collector.newrelic.com/v1/accounts/{account_id}/events
+event_type = Server Health 1
  
 [instance]
 
