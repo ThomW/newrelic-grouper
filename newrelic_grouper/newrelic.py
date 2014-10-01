@@ -147,27 +147,30 @@ class NRGrouper:
         """
         This is the infinite loop that's responsible for keeping the application alive
         """
+        
+        # Initialize our minute watcher to attempt to start processing at the top of the minute
+        start_minutes = int(time.time() / 60)
+        start_seconds = int(time.time() % 60)
+        if start_seconds > 30:
+            sleep_seconds = 60 - start_seconds
+            if self.debug:
+                print 'STARTUP: sleeping {0} seconds to synchronize'.format(sleep_seconds)
+            time.sleep(sleep_seconds)
+
         # INFINITE LOOP
         while True:
 
-            # Capture start time of this iteration of the main loop
-            start_time = time.time()
-
-            # Update all instances
-            for instance in self.instances:
-                self.add_to_newrelic(instance)
-
-            # Calculate the amount of time passed, and the amount of time that should be spent sleeping
-            duration = time.time() - start_time
-            sleep_seconds = 0
-            if duration <= 60:
-                sleep_seconds = 60 - duration
-
-            if self.debug:
-                print 'Last loop took {duration} seconds. Sleeping for {sleep_seconds} seconds'.format(duration=duration, sleep_seconds=sleep_seconds)
-
-            time.sleep(sleep_seconds)
-
+            # Wait for the minute to change and allow the instances to update
+            minutes = int(time.time() / 60)
+            if minutes != start_minutes:
+                # Update all instances
+                for instance in self.instances:
+                    self.add_to_newrelic(instance)
+                # Update start_minutes
+                start_minutes = minutes
+            else:
+                # Go to sleep
+                time.sleep(10)
         
     def add_to_newrelic(self, instance):
         """
