@@ -65,6 +65,7 @@ class NRGrouper:
             self.license_key = config.get('newrelic', 'key')
             self.api_url = config.get('newrelic', 'url')
 
+            self.insights_enabled = config.getboolean('Insights', 'enabled')
             self.insights_account_id = config.get('Insights', 'account_id')
             self.insights_api_key = config.get('Insights', 'api_key')
             self.insights_url = config.get('Insights', 'url')
@@ -238,7 +239,7 @@ class NRGrouper:
 
         # If the above request was completed successfully, fire off the Insights event
         # to format and send an event to Insights
-        if request_complete:
+        if self.insights_enabled and request_complete:
             self.post_insights_event(self.instances[instance])
 
 
